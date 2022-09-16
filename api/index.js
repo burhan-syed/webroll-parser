@@ -1,9 +1,13 @@
 import chrome from 'chrome-aws-lambda'
 import { chromium } from 'playwright-core'
-import { serverTiming } from './../lib/helpers.js'
+import { serverTiming } from '../lib/helpers.js'
 import { putImageObject } from '../lib/bucket.js'
+import { sendPayload } from '../lib/send.js'
+import { compressAndConvertImage } from '../lib/image.js'
 import he from '../lib/decoder.js'
 import Fastify from 'fastify'
+
+const secret = process.env.MY_SECRET_KEY
 
 const app = Fastify({
   logger: process.env.NODE_ENV === 'development' ? true : false,
@@ -12,6 +16,7 @@ const app = Fastify({
 const allowedOrigins = ['localhost', 'web-roll.vercel.app']
 
 const resolveOrigin = (origin) => {
+  console.log('resolving', origin)
   if (allowedOrigins.includes(new URL(origin).hostname)) {
     return origin
   }
@@ -78,8 +83,10 @@ const handleScreenshot = async ({ params, url }) => {
   })
 
   const page = await browser.newPage({
-    width: 1280,
-    height: 720,
+    viewport: {
+      width: 1920,
+      height: 1080,
+    },
     deviceScaleFactor: 1,
   })
   serverTiming.measure('browserStart')
@@ -116,12 +123,14 @@ const handleScreenshot = async ({ params, url }) => {
   }
   serverTiming.measure('screenshot')
   // Snap screenshot
-  const buffer = await page.screenshot({ type: 'png' })
-  await uploadImage(url, buffer)
+  const buffer = await page.screenshot()
+  const compressed = await compressAndConvertImage(buffer)
+  console.log('compressed:', compressed)
+  let upload = uploadImage(url, compressed)
   const html = await res.text()
   await checkMetas(html)
   serverTiming.measure('screenshot')
-
+  await upload
   await page.close()
   await browser.close()
 
@@ -135,50 +144,53 @@ app.get('/', async () => {
 /**
  * @type {import('fastify').RouteShorthandOptions}
  */
+// eslint-disable-next-line no-unused-vars
 app.get('/api/parse', async (req, reply) => {
-  let { url } = req.query
+  throw { statusCode: 404, message: 'invalid route' }
 
-  if (req.headers.origin) {
-    reply.header(
-      'Access-Control-Allow-Origin',
-      resolveOrigin(req.headers.origin)
-    )
-  }
+  // let { url } = req.query
 
-  if (!url) {
-    url = req.body?.url ?? undefined
-    reply.header('Access-Control-Allow-Headers', 'Content-Type')
-    reply.header('Content-Type', 'application/json')
-    throw { statusCode: 400, message: 'Missing URL Param' }
-  }
+  // if (req.headers.origin) {
+  //   reply.header(
+  //     'Access-Control-Allow-Origin',
+  //     resolveOrigin(req.headers.origin)
+  //   )
+  // }
 
-  try {
-    // Set the `s-maxage` property to cache at the CDN layer
-    reply.header('Cache-Control', 's-maxage=31536000, public')
-    reply.header('Content-Type', 'image/png')
+  // if (!url) {
+  //   url = req.body?.url ?? undefined
+  //   reply.header('Access-Control-Allow-Headers', 'Content-Type')
+  //   reply.header('Content-Type', 'application/json')
+  //   throw { statusCode: 400, message: 'Missing URL Param' }
+  // }
 
-    // Generate Server-Timing headers
-    const metadata = await handleScreenshot({ params: req.query, url })
-    reply.header('Server-Timing', serverTiming.setHeader())
-    return JSON.stringify(metadata)
-  } catch (e) {
-    console.error('Error generating screenshot -', e)
-    return JSON.stringify({
-      message: 'Image Capture Failed',
-      error: e,
-    })
-  }
+  // try {
+  //   // Set the `s-maxage` property to cache at the CDN layer
+  //   reply.header('Cache-Control', 's-maxage=31536000, public')
+  //   reply.header('Content-Type', 'image/png')
+
+  //   // Generate Server-Timing headers
+  //   const metadata = await handleScreenshot({ params: req.query, url })
+  //   reply.header('Server-Timing', serverTiming.setHeader())
+  //   return JSON.stringify(metadata)
+  // } catch (e) {
+  //   console.error('Error generating screenshot -', e)
+  //   return JSON.stringify({
+  //     message: 'Image Capture Failed',
+  //     error: e,
+  //   })
+  // }
 })
 
 /**
  * @type {import('fastify').RouteShorthandOptions}
  */
 app.post('/api/parse', async (req, reply) => {
-  let { url } = req.query
+  const { url, key, siteID, assigner } = req.body
 
-  if (!url) {
-    url = req.body?.url ?? undefined
-  }
+  // if (!url) {
+  //   url = req.body?.url ?? undefined
+  // }
   if (req.headers.origin) {
     reply.header(
       'Access-Control-Allow-Origin',
@@ -190,6 +202,11 @@ app.post('/api/parse', async (req, reply) => {
     reply.header('Content-Type', 'application/json')
     throw { statusCode: 400, message: 'Missing URL Param' }
   }
+  if (!key || key !== secret) {
+    reply.header('Access-Control-Allow-Headers', 'Content-Type')
+    reply.header('Content-Type', 'application/json')
+    throw { statusCode: 401, message: 'Unauthorized' }
+  }
 
   try {
     // Set the `s-maxage` property to cache at the CDN layer
@@ -200,7 +217,25 @@ app.post('/api/parse', async (req, reply) => {
     reply.header('Server-Timing', serverTiming.setHeader())
 
     const metadata = await handleScreenshot({ params: req.query, url })
-    return JSON.stringify(metadata)
+    const payload = {
+      secret: key,
+      assigner: assigner,
+      siteData: {
+        id: siteID,
+        description: metadata?.description,
+        name: metadata?.title,
+        imgKey: metadata.imgKey,
+        status: 'REVIEW',
+      },
+    }
+    // console.log('SEND: ', payload)
+    const postResponse = await sendPayload(payload)
+    // const postResponse = await post(
+    //   'http://localhost:3000/api/update-site',
+    //   payload
+    // )
+    console.log('post response:', postResponse)
+    return JSON.stringify(payload)
   } catch (e) {
     console.error('Error generating screenshot -', e)
     return JSON.stringify({
