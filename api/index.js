@@ -211,7 +211,7 @@ app.post('/api/parse', async (req, reply) => {
   try {
     // Set the `s-maxage` property to cache at the CDN layer
     reply.header('Cache-Control', 's-maxage=31536000, public')
-    reply.header('Content-Type', 'image/png')
+    reply.header('Content-Type', 'application/json')
 
     // Generate Server-Timing headers
     reply.header('Server-Timing', serverTiming.setHeader())
@@ -226,6 +226,7 @@ app.post('/api/parse', async (req, reply) => {
         name: metadata?.title,
         imgKey: metadata.imgKey,
         status: 'REVIEW',
+        updatedAt: new Date(),
       },
     }
     // console.log('SEND: ', payload)
