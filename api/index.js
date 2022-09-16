@@ -3,7 +3,7 @@ import { chromium } from 'playwright-core'
 import { serverTiming } from '../lib/helpers.js'
 import { putImageObject } from '../lib/bucket.js'
 import { sendPayload } from '../lib/send.js'
-import { compressAndConvertImage } from '../lib/image.js'
+//import { compressAndConvertImage } from '../lib/image.js'
 import he from '../lib/decoder.js'
 import Fastify from 'fastify'
 
@@ -124,9 +124,9 @@ const handleScreenshot = async ({ params, url }) => {
   serverTiming.measure('screenshot')
   // Snap screenshot
   const buffer = await page.screenshot()
-  const compressed = await compressAndConvertImage(buffer)
-  console.log('compressed:', compressed)
-  let upload = uploadImage(url, compressed)
+  //const compressed = await compressAndConvertImage(buffer)
+  // console.log('compressed:', compressed)
+  let upload = uploadImage(url, buffer)
   const html = await res.text()
   await checkMetas(html)
   serverTiming.measure('screenshot')
