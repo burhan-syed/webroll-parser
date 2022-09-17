@@ -188,9 +188,7 @@ app.get('/api/parse', async (req, reply) => {
 app.post('/api/parse', async (req, reply) => {
   const { url, key, siteID, assigner } = req.body
 
-  // if (!url) {
-  //   url = req.body?.url ?? undefined
-  // }
+  console.log('parsing..', url)
   if (req.headers.origin) {
     reply.header(
       'Access-Control-Allow-Origin',
