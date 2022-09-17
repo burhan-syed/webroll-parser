@@ -134,7 +134,7 @@ const handleScreenshot = async ({ params, url }) => {
   await page.close()
   await browser.close()
 
-  return metadata
+  return { metadata }
 }
 
 app.get('/', async () => {
@@ -216,10 +216,14 @@ app.post('/api/parse', async (req, reply) => {
     // Generate Server-Timing headers
     reply.header('Server-Timing', serverTiming.setHeader())
 
-    const metadata = await handleScreenshot({ params: req.query, url })
+    const { metadata } = await handleScreenshot({
+      params: req.query,
+      url,
+    })
     const payload = {
       secret: key,
       assigner: assigner,
+      //imgBuffer: buffer,
       siteData: {
         id: siteID,
         description: metadata?.description,
@@ -229,12 +233,7 @@ app.post('/api/parse', async (req, reply) => {
         updatedAt: new Date(),
       },
     }
-    // console.log('SEND: ', payload)
     const postResponse = await sendPayload(payload)
-    // const postResponse = await post(
-    //   'http://localhost:3000/api/update-site',
-    //   payload
-    // )
     console.log('post response:', postResponse)
     return JSON.stringify(payload)
   } catch (e) {
