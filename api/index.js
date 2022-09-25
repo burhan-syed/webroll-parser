@@ -1,8 +1,8 @@
 import chrome from 'chrome-aws-lambda'
 import { chromium } from 'playwright-core'
 import { serverTiming } from '../lib/helpers.js'
-import { putImageObject } from '../lib/bucket.js'
-import { sendPayload } from '../lib/send.js'
+//import { putImageObject } from '../lib/bucket.js'
+import { sendImage, sendPayload } from '../lib/send.js'
 //import { compressAndConvertImage } from '../lib/image.js'
 import he from '../lib/decoder.js'
 import Fastify from 'fastify'
@@ -31,16 +31,16 @@ const decode = (str) => {
 const handleScreenshot = async ({ params, url }) => {
   const { colorScheme, skipCookieBannerClick } = params
   const metadata = {}
-  const uploadImage = async (url, screen) => {
-    try {
-      const imgKey = await putImageObject({ image: screen, siteURL: url })
-      //metadata["ETAG"] = data.ETag;
-      metadata['imgKey'] = imgKey
-      // metadata["imgLocation"] = data.Location;
-    } catch (err) {
-      console.err("couldn't upload image", err)
-    }
-  }
+  // const uploadImage = async (url, screen) => {
+  //   try {
+  //     const imgKey = await putImageObject({ image: screen, siteURL: url })
+  //     //metadata["ETAG"] = data.ETag;
+  //     metadata['imgKey'] = imgKey
+  //     // metadata["imgLocation"] = data.Location;
+  //   } catch (err) {
+  //     console.err("couldn't upload image", err)
+  //   }
+  // }
   const checkMetas = (html) => {
     const headText = html.split('</head>')?.[0] ?? ''
     const head = decode(headText)
@@ -58,7 +58,9 @@ const handleScreenshot = async ({ params, url }) => {
         /(property|name)="(.*?)".+content="(.*?)".*\/>/gim,
         (match, p0, p1, p2) => {
           console.log('type', p1, 'P2', p2)
-          metadata[p1] = p2
+          if (!metadata?.[p1] || p2?.length > metadata[p1]?.length) {
+            metadata[p1] = p2
+          }
           return ''
         }
       )
@@ -123,18 +125,19 @@ const handleScreenshot = async ({ params, url }) => {
   }
   serverTiming.measure('screenshot')
   // Snap screenshot
-  const buffer = await page.screenshot()
+  const buffer = await page.screenshot({ quality: 50, type: 'jpeg' })
+  const base64data = buffer.toString('base64')
   //const compressed = await compressAndConvertImage(buffer)
   // console.log('compressed:', compressed)
-  let upload = uploadImage(url, buffer)
+  //let upload = uploadImage(url, buffer)
   const html = await res.text()
   await checkMetas(html)
   serverTiming.measure('screenshot')
-  await upload
+  //await upload
   await page.close()
   await browser.close()
 
-  return { metadata }
+  return { metadata, base64data }
 }
 
 app.get('/', async () => {
@@ -214,7 +217,7 @@ app.post('/api/parse', async (req, reply) => {
     // Generate Server-Timing headers
     reply.header('Server-Timing', serverTiming.setHeader())
 
-    const { metadata } = await handleScreenshot({
+    const { metadata, base64data } = await handleScreenshot({
       params: req.query,
       url,
     })
@@ -224,6 +227,7 @@ app.post('/api/parse', async (req, reply) => {
       //imgBuffer: buffer,
       siteData: {
         id: siteID,
+        url: url,
         description: metadata?.description,
         name: metadata?.title,
         imgKey: metadata.imgKey,
@@ -232,6 +236,7 @@ app.post('/api/parse', async (req, reply) => {
       },
     }
     const postResponse = await sendPayload(payload)
+    await sendImage(base64data, payload)
     console.log('post response:', postResponse)
     return JSON.stringify(payload)
   } catch (e) {
